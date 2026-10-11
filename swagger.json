@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "CampusConnect API",
-    "version": "1.0.0",
-    "description": "REST API for campus events, study groups, announcements and participation. **Week 5 scope:** full CRUD for `events` and `announcements`. Study groups, participations, users and GitHub OAuth are added in later weeks.\n\nAll errors return JSON in the form `{ \"error\": \"message\", \"details\": [..] }`."
+    "version": "2.0.0",
+    "description": "REST API for campus events, study groups, announcements and participation, with GitHub OAuth.\n\n**How to log in for testing:** open `/auth/github` in a new browser tab and approve GitHub. You are redirected back here and a session cookie is set; \"Try it out\" requests then run as that user. Check `GET /auth/status` to confirm.\n\n**Access rules:** all `GET` routes for events, announcements and study groups are public. Every `POST`, `PUT` and `DELETE` requires login (401 otherwise), and `PUT`/`DELETE` also require that you own the record (403 otherwise). Participation routes are always login-only and personal. The owner id (organizer, author, owner, user) is taken from your login, never from the request body.\n\nErrors always return JSON: `{ \"error\": \"message\", \"details\": [...] }`."
   },
   "servers": [
     {
@@ -13,26 +13,161 @@
   ],
   "tags": [
     {
+      "name": "Auth",
+      "description": "GitHub OAuth login and session"
+    },
+    {
       "name": "Events",
       "description": "Campus events"
     },
     {
       "name": "Announcements",
       "description": "Campus announcements"
+    },
+    {
+      "name": "Study Groups",
+      "description": "Subject-focused study groups"
+    },
+    {
+      "name": "Participations",
+      "description": "Joining events and study groups (login required)"
     }
   ],
   "paths": {
+    "/auth/github": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Start GitHub login",
+        "description": "Open this URL **in a browser tab** (it redirects to GitHub, so \"Try it out\" cannot complete it).",
+        "responses": {
+          "302": {
+            "description": "Redirect to GitHub"
+          },
+          "503": {
+            "description": "OAuth not configured on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/github/callback": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "GitHub OAuth callback",
+        "description": "Called by GitHub after approval. Creates the session and redirects to /api-docs.",
+        "responses": {
+          "302": {
+            "description": "Redirect to /api-docs on success, /auth/failure on failure"
+          }
+        }
+      }
+    },
+    "/auth/status": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Current login state",
+        "responses": {
+          "200": {
+            "description": "Authentication state and safe profile fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatus"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Log out (destroys the session)",
+        "responses": {
+          "200": {
+            "description": "Logged out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "Logged out successfully"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/failure": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "OAuth failure target",
+        "responses": {
+          "401": {
+            "description": "GitHub authentication failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "tags": [
           "Events"
         ],
-        "summary": "List all events",
+        "summary": "List events",
         "parameters": [
           {
             "name": "category",
             "in": "query",
-            "required": false,
             "schema": {
               "type": "string",
               "enum": [
@@ -49,7 +184,6 @@
           {
             "name": "status",
             "in": "query",
-            "required": false,
             "schema": {
               "type": "string",
               "enum": [
@@ -101,7 +235,7 @@
         "tags": [
           "Events"
         ],
-        "summary": "Create a new event",
+        "summary": "Create a event (login required)",
         "requestBody": {
           "required": true,
           "content": {
@@ -117,12 +251,16 @@
                 "endDate": "2026-11-12T15:00:00.000Z",
                 "category": "career",
                 "capacity": 300,
-                "organizerId": "665f1c2e8a1b2c3d4e5f6a7b",
                 "status": "scheduled"
               }
             }
           }
         },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "201": {
             "description": "Event created",
@@ -135,7 +273,17 @@
             }
           },
           "400": {
-            "description": "Validation failed (missing or invalid fields, malformed JSON)",
+            "description": "Validation failed (missing/invalid fields or malformed JSON)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
             "content": {
               "application/json": {
                 "schema": {
@@ -222,7 +370,8 @@
         "tags": [
           "Events"
         ],
-        "summary": "Update a event (full replacement of the editable fields)",
+        "summary": "Update a event (login required, organizer only)",
+        "description": "Replaces all editable fields. `endDate` must not be earlier than `startDate`.",
         "parameters": [
           {
             "name": "id",
@@ -250,12 +399,16 @@
                 "endDate": "2026-11-12T15:00:00.000Z",
                 "category": "career",
                 "capacity": 300,
-                "organizerId": "665f1c2e8a1b2c3d4e5f6a7b",
                 "status": "scheduled"
               }
             }
           }
         },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated event",
@@ -269,6 +422,26 @@
           },
           "400": {
             "description": "Invalid id or validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the organizer (or an admin) can modify this event",
             "content": {
               "application/json": {
                 "schema": {
@@ -303,7 +476,7 @@
         "tags": [
           "Events"
         ],
-        "summary": "Delete a event",
+        "summary": "Delete a event (login required, organizer only)",
         "parameters": [
           {
             "name": "id",
@@ -314,6 +487,11 @@
               "type": "string",
               "example": "665f1c2e8a1b2c3d4e5f6a7b"
             }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
           }
         ],
         "responses": {
@@ -339,6 +517,26 @@
           },
           "400": {
             "description": "Invalid id format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the organizer (or an admin) can modify this event",
             "content": {
               "application/json": {
                 "schema": {
@@ -375,12 +573,11 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "List all announcements",
+        "summary": "List announcements",
         "parameters": [
           {
             "name": "category",
             "in": "query",
-            "required": false,
             "schema": {
               "type": "string",
               "enum": [
@@ -434,7 +631,7 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Create a new announcement",
+        "summary": "Create a announcement (login required)",
         "requestBody": {
           "required": true,
           "content": {
@@ -446,13 +643,17 @@
                 "title": "Library extended hours during finals",
                 "body": "The main library will stay open until 2 AM from Dec 1 to Dec 14.",
                 "category": "academic",
-                "authorId": "665f1c2e8a1b2c3d4e5f6a7b",
                 "publishedAt": "2026-11-20T08:00:00.000Z",
                 "expiresAt": "2026-12-15T00:00:00.000Z"
               }
             }
           }
         },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "201": {
             "description": "Announcement created",
@@ -465,7 +666,17 @@
             }
           },
           "400": {
-            "description": "Validation failed (missing or invalid fields, malformed JSON)",
+            "description": "Validation failed (missing/invalid fields or malformed JSON)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
             "content": {
               "application/json": {
                 "schema": {
@@ -552,7 +763,8 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Update a announcement (full replacement of the editable fields)",
+        "summary": "Update a announcement (login required, author only)",
+        "description": "Replaces all editable fields. `expiresAt` must not be earlier than `publishedAt`.",
         "parameters": [
           {
             "name": "id",
@@ -576,13 +788,17 @@
                 "title": "Library extended hours during finals",
                 "body": "The main library will stay open until 2 AM from Dec 1 to Dec 14.",
                 "category": "academic",
-                "authorId": "665f1c2e8a1b2c3d4e5f6a7b",
                 "publishedAt": "2026-11-20T08:00:00.000Z",
                 "expiresAt": "2026-12-15T00:00:00.000Z"
               }
             }
           }
         },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated announcement",
@@ -596,6 +812,26 @@
           },
           "400": {
             "description": "Invalid id or validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the author (or an admin) can modify this announcement",
             "content": {
               "application/json": {
                 "schema": {
@@ -630,7 +866,7 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Delete a announcement",
+        "summary": "Delete a announcement (login required, author only)",
         "parameters": [
           {
             "name": "id",
@@ -641,6 +877,11 @@
               "type": "string",
               "example": "665f1c2e8a1b2c3d4e5f6a7b"
             }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
           }
         ],
         "responses": {
@@ -674,8 +915,876 @@
               }
             }
           },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the author (or an admin) can modify this announcement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Announcement not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study-groups": {
+      "get": {
+        "tags": [
+          "Study Groups"
+        ],
+        "summary": "List study groups",
+        "parameters": [
+          {
+            "name": "subject",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact subject match, e.g. Mathematics"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of study groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StudyGroup"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Study Groups"
+        ],
+        "summary": "Create a study group (login required)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudyGroupInput"
+              },
+              "example": {
+                "name": "Algorithms Study Circle",
+                "subject": "Computer Science",
+                "description": "Weekly practice on data structures and algorithms.",
+                "meetingLocation": "Library, Room 3B",
+                "meetingSchedule": "Tuesdays 6-8 PM",
+                "capacity": 12
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Study group created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (missing/invalid fields or malformed JSON)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study-groups/{id}": {
+      "get": {
+        "tags": [
+          "Study Groups"
+        ],
+        "summary": "Get a study group by id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Study group ObjectId (24-character hex string)",
+            "schema": {
+              "type": "string",
+              "example": "665f1c2e8a1b2c3d4e5f6a7b"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The study group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Study group not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Study Groups"
+        ],
+        "summary": "Update a study group (login required, owner only)",
+        "description": "Replaces all editable fields. `capacity` cannot be lower than the current number of members.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Study group ObjectId (24-character hex string)",
+            "schema": {
+              "type": "string",
+              "example": "665f1c2e8a1b2c3d4e5f6a7b"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudyGroupInput"
+              },
+              "example": {
+                "name": "Algorithms Study Circle",
+                "subject": "Computer Science",
+                "description": "Weekly practice on data structures and algorithms.",
+                "meetingLocation": "Library, Room 3B",
+                "meetingSchedule": "Tuesdays 6-8 PM",
+                "capacity": 12
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated study group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id or validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the owner (or an admin) can modify this study group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Study group not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Study Groups"
+        ],
+        "summary": "Delete a study group (login required, owner only)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Study group ObjectId (24-character hex string)",
+            "schema": {
+              "type": "string",
+              "example": "665f1c2e8a1b2c3d4e5f6a7b"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Study group deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "Study group deleted successfully"
+                    },
+                    "id": {
+                      "type": "string",
+                      "example": "665f1c2e8a1b2c3d4e5f6a7b"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the owner (or an admin) can modify this study group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Study group not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/participations": {
+      "get": {
+        "tags": [
+          "Participations"
+        ],
+        "summary": "List participations (login required)",
+        "description": "Returns your own participation records (admins see everyone's).",
+        "parameters": [
+          {
+            "name": "targetType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "event",
+                "studyGroup"
+              ]
+            },
+            "description": "Filter by target type"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "cancelled"
+              ]
+            },
+            "description": "Filter by status"
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of participations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Participation"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Participations"
+        ],
+        "summary": "Create a participation (login required)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParticipationInput"
+              },
+              "example": {
+                "targetType": "event",
+                "targetId": "665f1c2e8a1b2c3d4e5f6a7b"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Participation created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Participation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (missing/invalid fields or malformed JSON)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The event or study group in targetId does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "You already have an active participation for this target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/participations/{id}": {
+      "get": {
+        "tags": [
+          "Participations"
+        ],
+        "summary": "Get a participation by id (login required)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Participation ObjectId (24-character hex string)",
+            "schema": {
+              "type": "string",
+              "example": "665f1c2e8a1b2c3d4e5f6a7b"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The participation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Participation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Record belongs to another user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Participation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Participations"
+        ],
+        "summary": "Update a participation (login required, participant only)",
+        "description": "Only `status` is editable (`active` or `cancelled`). Reactivating is blocked with 409 if another active record exists for the same target.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Participation ObjectId (24-character hex string)",
+            "schema": {
+              "type": "string",
+              "example": "665f1c2e8a1b2c3d4e5f6a7b"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParticipationUpdate"
+              },
+              "example": {
+                "status": "cancelled"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated participation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Participation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id or validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the participant (or an admin) can modify this participation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Participation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An active participation already exists for this target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database or server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Participations"
+        ],
+        "summary": "Delete a participation (login required, participant only)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Participation ObjectId (24-character hex string)",
+            "schema": {
+              "type": "string",
+              "example": "665f1c2e8a1b2c3d4e5f6a7b"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Participation deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "Participation deleted successfully"
+                    },
+                    "id": {
+                      "type": "string",
+                      "example": "665f1c2e8a1b2c3d4e5f6a7b"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not logged in - open /auth/github in a browser tab first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the participant (or an admin) can modify this participation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Participation not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -699,6 +1808,14 @@
     }
   },
   "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "connect.sid",
+        "description": "Session cookie set after GitHub login. You do not enter it here: log in at /auth/github in a browser tab and the browser sends it automatically."
+      }
+    },
     "schemas": {
       "EventInput": {
         "type": "object",
@@ -709,8 +1826,7 @@
           "startDate",
           "endDate",
           "category",
-          "capacity",
-          "organizerId"
+          "capacity"
         ],
         "properties": {
           "title": {
@@ -755,11 +1871,6 @@
             "minimum": 1,
             "maximum": 100000,
             "example": 300
-          },
-          "organizerId": {
-            "type": "string",
-            "description": "ObjectId of the organizing user",
-            "example": "665f1c2e8a1b2c3d4e5f6a7b"
           },
           "status": {
             "type": "string",
@@ -823,11 +1934,6 @@
             "maximum": 100000,
             "example": 300
           },
-          "organizerId": {
-            "type": "string",
-            "description": "ObjectId of the organizing user",
-            "example": "665f1c2e8a1b2c3d4e5f6a7b"
-          },
           "status": {
             "type": "string",
             "enum": [
@@ -837,6 +1943,12 @@
             ],
             "default": "scheduled",
             "example": "scheduled"
+          },
+          "organizerId": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Set from the logged-in user",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
           },
           "createdAt": {
             "type": "string",
@@ -855,8 +1967,7 @@
         "required": [
           "title",
           "body",
-          "category",
-          "authorId"
+          "category"
         ],
         "properties": {
           "title": {
@@ -879,11 +1990,6 @@
               "social"
             ],
             "example": "academic"
-          },
-          "authorId": {
-            "type": "string",
-            "description": "ObjectId of the author",
-            "example": "665f1c2e8a1b2c3d4e5f6a7b"
           },
           "publishedAt": {
             "type": "string",
@@ -928,11 +2034,6 @@
             ],
             "example": "academic"
           },
-          "authorId": {
-            "type": "string",
-            "description": "ObjectId of the author",
-            "example": "665f1c2e8a1b2c3d4e5f6a7b"
-          },
           "publishedAt": {
             "type": "string",
             "format": "date-time",
@@ -946,6 +2047,12 @@
             "nullable": true,
             "description": "Optional expiry date"
           },
+          "authorId": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Set from the logged-in user",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -955,6 +2062,239 @@
             "type": "string",
             "format": "date-time",
             "example": "2026-10-08T10:00:00.000Z"
+          }
+        }
+      },
+      "StudyGroupInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "subject",
+          "description",
+          "meetingLocation",
+          "meetingSchedule",
+          "capacity"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Algorithms Study Circle"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Computer Science"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "Weekly practice on data structures and algorithms."
+          },
+          "meetingLocation": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Library, Room 3B"
+          },
+          "meetingSchedule": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Tuesdays 6-8 PM"
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 100,
+            "example": 12
+          }
+        }
+      },
+      "StudyGroup": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Algorithms Study Circle"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Computer Science"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "Weekly practice on data structures and algorithms."
+          },
+          "meetingLocation": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Library, Room 3B"
+          },
+          "meetingSchedule": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Tuesdays 6-8 PM"
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 100,
+            "example": 12
+          },
+          "ownerId": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Set from the logged-in user",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          },
+          "memberIds": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "665f1c2e8a1b2c3d4e5f6a7b"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-08T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-08T10:00:00.000Z"
+          }
+        }
+      },
+      "ParticipationInput": {
+        "type": "object",
+        "required": [
+          "targetType",
+          "targetId"
+        ],
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "event",
+              "studyGroup"
+            ],
+            "example": "event"
+          },
+          "targetId": {
+            "type": "string",
+            "description": "ObjectId of an existing event or study group",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          }
+        }
+      },
+      "ParticipationUpdate": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "cancelled"
+            ],
+            "example": "cancelled"
+          }
+        }
+      },
+      "Participation": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          },
+          "userId": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Set from the logged-in user",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "event",
+              "studyGroup"
+            ],
+            "example": "event"
+          },
+          "targetId": {
+            "type": "string",
+            "example": "665f1c2e8a1b2c3d4e5f6a7b"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "cancelled"
+            ],
+            "example": "active"
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-08T10:00:00.000Z"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-08T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-08T10:00:00.000Z"
+          }
+        }
+      },
+      "AuthStatus": {
+        "type": "object",
+        "properties": {
+          "authenticated": {
+            "type": "boolean",
+            "example": true
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "example": "665f1c2e8a1b2c3d4e5f6a7b"
+              },
+              "username": {
+                "type": "string",
+                "example": "octocat"
+              },
+              "displayName": {
+                "type": "string",
+                "example": "The Octocat"
+              },
+              "avatarUrl": {
+                "type": "string",
+                "nullable": true,
+                "example": "https://avatars.githubusercontent.com/u/583231"
+              },
+              "role": {
+                "type": "string",
+                "example": "user"
+              }
+            }
           }
         }
       },

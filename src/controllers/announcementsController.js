@@ -4,9 +4,12 @@ const {
   isValidObjectId,
   validateAnnouncement,
 } = require('../utils/validators');
+const { isOwnerOrAdmin } = require('../utils/ownership');
 const { sendError } = require('../utils/httpError');
 
-// GET /api/announcements?category=
+const BAD_ID = 'Invalid announcement id format. Expected a 24-character hex ObjectId';
+
+// GET /api/announcements?category=   (public)
 async function getAllAnnouncements(req, res) {
   try {
     const filter = {};
@@ -27,13 +30,11 @@ async function getAllAnnouncements(req, res) {
   }
 }
 
-// GET /api/announcements/:id
+// GET /api/announcements/:id   (public)
 async function getAnnouncementById(req, res) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return sendError(res, 400, 'Invalid announcement id format. Expected a 24-character hex ObjectId');
-    }
+    if (!isValidObjectId(id)) return sendError(res, 400, BAD_ID);
 
     const announcement = await Announcement.findById(id);
     if (!announcement) return sendError(res, 404, 'Announcement not found');
@@ -45,13 +46,13 @@ async function getAnnouncementById(req, res) {
   }
 }
 
-// POST /api/announcements
+// POST /api/announcements   (login required)
 async function createAnnouncement(req, res) {
   try {
     const { errors, data } = validateAnnouncement(req.body);
     if (errors.length) return sendError(res, 400, 'Validation failed', errors);
 
-    const created = await Announcement.create(data);
+    const created = await Announcement.create({ ...data, authorId: req.user._id });
     return res.status(201).json(created);
   } catch (err) {
     console.error('createAnnouncement failed:', err.message);
@@ -59,16 +60,20 @@ async function createAnnouncement(req, res) {
   }
 }
 
-// PUT /api/announcements/:id
+// PUT /api/announcements/:id   (login required, author or admin)
 async function updateAnnouncement(req, res) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return sendError(res, 400, 'Invalid announcement id format. Expected a 24-character hex ObjectId');
-    }
+    if (!isValidObjectId(id)) return sendError(res, 400, BAD_ID);
 
     const { errors, data } = validateAnnouncement(req.body);
     if (errors.length) return sendError(res, 400, 'Validation failed', errors);
+
+    const existing = await Announcement.findById(id);
+    if (!existing) return sendError(res, 404, 'Announcement not found');
+    if (!isOwnerOrAdmin(req.user, existing.authorId)) {
+      return sendError(res, 403, 'You can only modify announcements you authored');
+    }
 
     const updated = await Announcement.update(id, data);
     if (!updated) return sendError(res, 404, 'Announcement not found');
@@ -80,12 +85,16 @@ async function updateAnnouncement(req, res) {
   }
 }
 
-// DELETE /api/announcements/:id
+// DELETE /api/announcements/:id   (login required, author or admin)
 async function deleteAnnouncement(req, res) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return sendError(res, 400, 'Invalid announcement id format. Expected a 24-character hex ObjectId');
+    if (!isValidObjectId(id)) return sendError(res, 400, BAD_ID);
+
+    const existing = await Announcement.findById(id);
+    if (!existing) return sendError(res, 404, 'Announcement not found');
+    if (!isOwnerOrAdmin(req.user, existing.authorId)) {
+      return sendError(res, 403, 'You can only modify announcements you authored');
     }
 
     const deleted = await Announcement.remove(id);

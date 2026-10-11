@@ -4,7 +4,8 @@ require('dotenv').config();
 const { ObjectId } = require('mongodb');
 const { connectDb, closeDb } = require('../src/config/db');
 
-// Placeholder user id until the users collection + OAuth arrive in Week 6.
+// Placeholder owner for sample data. Records owned by this id belong to nobody who can log in,
+// so editing them returns 403 - create your own records through Swagger to demo PUT/DELETE.
 const SAMPLE_USER_ID = new ObjectId('665f1c2e8a1b2c3d4e5f6a7b');
 
 async function seed() {
@@ -23,6 +24,11 @@ async function seed() {
     { title: 'Campus safety walk-home service', body: 'Request a free evening escort via the campus safety desk.', category: 'safety', authorId: SAMPLE_USER_ID, publishedAt: now, expiresAt: null },
   ];
 
+  const studyGroups = [
+    { name: 'Algorithms Study Circle', subject: 'Computer Science', description: 'Weekly practice on data structures and algorithms.', meetingLocation: 'Library, Room 3B', meetingSchedule: 'Tuesdays 6-8 PM', capacity: 12, ownerId: SAMPLE_USER_ID, memberIds: [SAMPLE_USER_ID] },
+    { name: 'Calculus Crash Group', subject: 'Mathematics', description: 'Problem-solving sessions before each midterm.', meetingLocation: 'Science Hall 110', meetingSchedule: 'Thursdays 4-6 PM', capacity: 8, ownerId: SAMPLE_USER_ID, memberIds: [SAMPLE_USER_ID] },
+  ];
+
   for (const e of events) {
     await db.collection('events').updateOne(
       { title: e.title },
@@ -38,7 +44,15 @@ async function seed() {
     );
   }
 
-  console.log(`Seeded up to ${events.length} events and ${announcements.length} announcements.`);
+  for (const g of studyGroups) {
+    await db.collection('studyGroups').updateOne(
+      { name: g.name },
+      { $setOnInsert: { ...g, createdAt: now, updatedAt: now } },
+      { upsert: true }
+    );
+  }
+
+  console.log(`Seeded up to ${events.length} events, ${announcements.length} announcements and ${studyGroups.length} study groups.`);
 }
 
 seed()

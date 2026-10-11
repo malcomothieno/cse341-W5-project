@@ -5,9 +5,12 @@ const {
   isValidObjectId,
   validateEvent,
 } = require('../utils/validators');
+const { isOwnerOrAdmin } = require('../utils/ownership');
 const { sendError } = require('../utils/httpError');
 
-// GET /api/events?category=&status=
+const BAD_ID = 'Invalid event id format. Expected a 24-character hex ObjectId';
+
+// GET /api/events?category=&status=   (public)
 async function getAllEvents(req, res) {
   try {
     const filter = {};
@@ -34,13 +37,11 @@ async function getAllEvents(req, res) {
   }
 }
 
-// GET /api/events/:id
+// GET /api/events/:id   (public)
 async function getEventById(req, res) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return sendError(res, 400, 'Invalid event id format. Expected a 24-character hex ObjectId');
-    }
+    if (!isValidObjectId(id)) return sendError(res, 400, BAD_ID);
 
     const event = await Event.findById(id);
     if (!event) return sendError(res, 404, 'Event not found');
@@ -52,13 +53,13 @@ async function getEventById(req, res) {
   }
 }
 
-// POST /api/events
+// POST /api/events   (login required)
 async function createEvent(req, res) {
   try {
     const { errors, data } = validateEvent(req.body);
     if (errors.length) return sendError(res, 400, 'Validation failed', errors);
 
-    const created = await Event.create(data);
+    const created = await Event.create({ ...data, organizerId: req.user._id });
     return res.status(201).json(created);
   } catch (err) {
     console.error('createEvent failed:', err.message);
@@ -66,16 +67,20 @@ async function createEvent(req, res) {
   }
 }
 
-// PUT /api/events/:id
+// PUT /api/events/:id   (login required, owner or admin)
 async function updateEvent(req, res) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return sendError(res, 400, 'Invalid event id format. Expected a 24-character hex ObjectId');
-    }
+    if (!isValidObjectId(id)) return sendError(res, 400, BAD_ID);
 
     const { errors, data } = validateEvent(req.body);
     if (errors.length) return sendError(res, 400, 'Validation failed', errors);
+
+    const existing = await Event.findById(id);
+    if (!existing) return sendError(res, 404, 'Event not found');
+    if (!isOwnerOrAdmin(req.user, existing.organizerId)) {
+      return sendError(res, 403, 'You can only modify events you organize');
+    }
 
     const updated = await Event.update(id, data);
     if (!updated) return sendError(res, 404, 'Event not found');
@@ -87,12 +92,16 @@ async function updateEvent(req, res) {
   }
 }
 
-// DELETE /api/events/:id
+// DELETE /api/events/:id   (login required, owner or admin)
 async function deleteEvent(req, res) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
-      return sendError(res, 400, 'Invalid event id format. Expected a 24-character hex ObjectId');
+    if (!isValidObjectId(id)) return sendError(res, 400, BAD_ID);
+
+    const existing = await Event.findById(id);
+    if (!existing) return sendError(res, 404, 'Event not found');
+    if (!isOwnerOrAdmin(req.user, existing.organizerId)) {
+      return sendError(res, 403, 'You can only modify events you organize');
     }
 
     const deleted = await Event.remove(id);
